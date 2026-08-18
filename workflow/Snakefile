@@ -1,0 +1,159 @@
+from pathlib import Path
+
+configfile: "config/config.yaml"
+
+wildcard_constraints:
+    subject=r"[A-Za-z0-9_-]+",
+    session=r"[A-Za-z0-9_-]+",
+    task=r"[A-Za-z0-9_-]+",
+
+ROOT_DIR = Path(config["dataset"]["root_dir"]).resolve()
+DERIV_ROOT = Path(config["dataset"]["derivatives_dir"]).resolve()
+
+PREPROCESSED_SNIRF = expand(
+    DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_nirs.snirf",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+BLOCKAVERAGE_SNIRF = expand(
+    DERIV_ROOT / "analysis/ses-{session}/nirs/ses-{session}_task-{task}_blockaverage.snirf",
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+ANALYSIS_OVERVIEW = DERIV_ROOT / "analysis/preprocess_overview.png"
+
+rule all:
+    input:
+        preprocessed_snirf = PREPROCESSED_SNIRF,
+        dqr = expand(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_dqr.png", 
+            subject=config["dataset"]["subjects"], 
+            session=config["dataset"]["sessions"], 
+            task=config["dataset"]["tasks"]
+        ),
+        dqrgvtdhist = expand(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_dqrgvtdhist.png", 
+            subject=config["dataset"]["subjects"], 
+            session=config["dataset"]["sessions"], 
+            task=config["dataset"]["tasks"]
+        ),
+        dqrquality = expand(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_dqrquality.png", 
+            subject=config["dataset"]["subjects"], 
+            session=config["dataset"]["sessions"], 
+            task=config["dataset"]["tasks"]
+        ),
+        blockaverage = BLOCKAVERAGE_SNIRF,
+        analysis_overview = ANALYSIS_OVERVIEW
+
+
+checkpoint download_dataset:
+    output:
+        directory(ROOT_DIR)
+    params:
+        url="http://doc.ibs.tu-berlin.de/cedalion/datasets/dev/Fresh_Motor.zip"
+    shell:
+        """
+        wget -O dataset.zip {params.url}
+        unzip dataset.zip -d tmp_extract
+        mv tmp_extract/*/ {output}
+        rmdir tmp_extract
+        rm dataset.zip
+        """
+
+def raw_data_files(wc):
+    """Locate the raw data files of a single run in the downloaded dataset.
+
+    The download_dataset checkpoint produces a directory. Snakemake tracks only the
+    directory itself, not the files inside it. Requesting the checkpoint here
+    establishes the dependency, so that a missing dataset gets downloaded.
+    """
+    root = Path(checkpoints.download_dataset.get().output[0])
+
+    prefix = root / f"sub-{wc.subject}/ses-{wc.session}/nirs"
+    
+    return {
+        "input_snirf": prefix / f"sub-{wc.subject}_ses-{wc.session}_task-{wc.task}_nirs.snirf",
+        "input_events": prefix / f"sub-{wc.subject}_ses-{wc.session}_task-{wc.task}_events.tsv",
+        "input_optodes": prefix / f"sub-{wc.subject}_ses-{wc.session}_optodes.json",
+        "input_coordsystem": prefix / f"sub-{wc.subject}_ses-{wc.session}_coordsystem.json",
+    }
+
+
+rule preprocess:
+    input:
+        unpack(raw_data_files),
+    output:
+        output_snirf = DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_nirs.snirf",
+        output_sidecar = DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_sidecar.nc"
+    params:
+        func="cedalion.sigproc.steps:preprocess",
+        config=config["preprocess"]
+    script:
+        "scripts/run_step.py"
+
+
+rule dqr:
+    input:
+        input_snirf = rules.preprocess.output.output_snirf,
+        input_sidecar = rules.preprocess.output.output_sidecar
+    output:
+        output_dqr = report(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_dqr.png", 
+            category="sub-{subject}", 
+            subcategory="ses-{session}",
+            labels={"metric" : "DQR overview"}
+        ),
+        output_gvtd_histogram = report(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_dqrgvtdhist.png",
+            category="sub-{subject}", 
+            subcategory="ses-{session}",
+            labels={"metric" : "GVTD Histogram"}
+        ),
+        output_channel_quality = report(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_dqrquality.png",
+            category="sub-{subject}", 
+            subcategory="ses-{session}",
+            labels={"metric" : "Channel Quality"}
+        )
+    params:
+        func="cedalion.vis.dqr:generate_dqr_plots",
+        config={}
+    script:
+        "scripts/run_step.py"
+
+
+rule blockaverage:
+    input:
+        input_snirf = expand(
+            DERIV_ROOT / "preprocess/sub-{subject}/ses-{{session}}/nirs/sub-{subject}_ses-{{session}}_task-{{task}}_nirs.snirf",
+            subject=config["dataset"]["subjects"],
+        ),
+    output:
+        output_snirf = DERIV_ROOT / "analysis/ses-{session}/nirs/ses-{session}_task-{task}_blockaverage.snirf",
+    params:
+        func="cedalion.sigproc.steps:blockaverage",
+        config=config["blockaverage"]
+    script:
+        "scripts/run_step.py"
+
+
+
+rule analyze:
+    input:
+         BLOCKAVERAGE_SNIRF
+    output:
+        output_overview = report(
+            ANALYSIS_OVERVIEW,
+            category="Analysis",
+            labels={"metric" : "Blockaveraged HRFs"}
+        )
+    log:
+        # optional path to the processed notebook
+        notebook="logs/notebooks/analyze_blockaverage.ipynb"
+    notebook:
+        "notebooks/analyze_blockaverage.ipynb"
+

@@ -1,0 +1,52 @@
+dataset:
+  root_dir : "resources/rawdata"
+  derivatives_dir: "results"
+  subjects : ["01", "02", "03", "04", "05", "06", "07", "08", "09"]
+  tasks: ["FRESHMOTOR"]
+  sessions: ["left2s", "left3s", "right2s", "right3s"]
+
+
+preprocess:
+  keep_intermediate : True
+  normalize_landmarks: True
+
+  methods:
+    - {name: amp_repaired,  method: repair_amp}
+
+    - name: amp_pruned
+      method: prune
+      params:
+        snr_thresh: 5
+        sd_thresh_min: "1 mm"
+        sd_thresh_max: "45 mm"
+        amp_thresh_min: 0.001
+        amp_thresh_max: 0.84
+        window_length: "5 s"
+        sci_thresh: 0.6
+        psp_thresh: 0.1
+        perc_time_clean_thresh: 0.6
+        use_sci: true
+        use_psp: false
+
+    - {name: gvtd_before, method: gvtd, params: {stat_type: histogram_mode, n_std: 10}}
+
+    - {name: od,  method: int2od}
+    - {name: od_tddr, method: tddr}
+    - {name: od_wavelet, method: wavelet}
+    #- {name: od_spline, method: spline, params: {p: 0.99}}
+    #- {name: od_spline_sg, method: spline_sg, params: {p: 1, frame_size: "10 s"}}
+    #- {name: od_pca, method: pca, params: {n_sv: 0.97}}
+    #- {name: od_pca_recurse, method: pca_recurse, params: {n_sv: 0.97, max_iter: 5}}
+
+    - {name: gvtd_after, method: gvtd_from_od, params: {stat_type: histogram_mode, n_std: 10}}
+    - {name: od_variance_corrected, method: log_variance}
+
+    - {name: od_ff,  method: freq_filter, params: {fmin: "0.01 Hz", fmax: "0.5 Hz"}}
+    - {name: conc,  method: od2conc}
+
+blockaverage:
+  t_pre : "2 s"
+  t_post : "30 s"
+  ts_name : "conc"
+
+
