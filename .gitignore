@@ -1,3 +1,5 @@
 .snakemake/
 results/
+logs/
 resources/rawdata/
+pysnirf2.log
