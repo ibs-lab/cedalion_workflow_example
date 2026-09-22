@@ -23,6 +23,55 @@ BLOCKAVERAGE_SNIRF = expand(
     task=config["dataset"]["tasks"]
 )
 
+IMAGE_RECON = expand(
+    DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image.nc",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+IMAGE_FEATURE = expand(
+    DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_feature.nc",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+IMAGE_STATISTICS = expand(
+    DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.nc",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+
+IMAGE_VISUALIZATION = expand(
+    DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.png",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+IMAGE_BLOCKAVERAGE = expand(
+    DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_blockaverage.nc",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+IMAGE_PARCEL_AVERAGE = expand(
+    DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_parcel_average.nc",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
+IMAGE_GROUP_AVERAGE = expand(
+    DERIV_ROOT / "image_recon/group/ses-{session}/nirs/ses-{session}_task-{task}_image_group_average.nc",
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
 ANALYSIS_OVERVIEW = DERIV_ROOT / "analysis/preprocess_overview.png"
 
 rule all:
@@ -47,6 +96,13 @@ rule all:
             task=config["dataset"]["tasks"]
         ),
         blockaverage = BLOCKAVERAGE_SNIRF,
+        image_reconstruction = IMAGE_RECON,
+        image_feature = IMAGE_FEATURE,
+        image_statistics = IMAGE_STATISTICS,
+        image_visualization = IMAGE_VISUALIZATION,
+        image_blockaverage = IMAGE_BLOCKAVERAGE,
+        image_parcel_average = IMAGE_PARCEL_AVERAGE,
+        image_group_average = IMAGE_GROUP_AVERAGE,
         analysis_overview = ANALYSIS_OVERVIEW
 
 
@@ -121,6 +177,125 @@ rule dqr:
         )
     params:
         func="cedalion.vis.dqr:generate_dqr_plots",
+        config={}
+    script:
+        "scripts/run_step.py"
+
+
+rule sensitivity:
+    input:
+        input_snirf = (
+            DERIV_ROOT
+            / f"preprocess/sub-{config['dataset']['subjects'][0]}"
+            / f"ses-{config['dataset']['sessions'][0]}/nirs"
+            / (
+                f"sub-{config['dataset']['subjects'][0]}"
+                f"_ses-{config['dataset']['sessions'][0]}"
+                f"_task-{config['dataset']['tasks'][0]}_nirs.snirf"
+            )
+        )
+    output:
+        output_fluence = (
+            DERIV_ROOT
+            / f"image_recon/shared/{config['sensitivity']['head_model']}_fluence.h5"
+        ),
+        output_sensitivity = (
+            DERIV_ROOT
+            / f"image_recon/shared/{config['sensitivity']['head_model']}_sensitivity.h5"
+        )
+    params:
+        func="cedalion.dot.steps:sensitivity",
+        config=config["sensitivity"]
+    script:
+        "scripts/run_step.py"
+
+
+rule image_reconstruction:
+    input:
+        input_snirf = rules.preprocess.output.output_snirf,
+        input_sensitivity = rules.sensitivity.output.output_sensitivity
+    output:
+        output_image = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image.nc"
+    params:
+        func="cedalion.dot.steps:image_reconstruction",
+        config=config["image_reconstruction"]
+    script:
+        "scripts/run_step.py"
+
+
+rule image_feature:
+    input:
+        input_image = rules.image_reconstruction.output.output_image,
+        input_snirf = rules.preprocess.output.output_snirf
+    output:
+        output_feature = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_feature.nc"
+    params:
+        func="cedalion.dot.steps:image_feature",
+        config=config["image_feature"]
+    script:
+        "scripts/run_step.py"
+
+
+rule image_statistics:
+    input:
+        input_feature = rules.image_feature.output.output_feature
+    output:
+        output_statistics = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.nc"
+    params:
+        func="cedalion.dot.steps:image_statistics",
+        config=config["image_statistics"]
+    script:
+        "scripts/run_step.py"
+
+
+rule image_visualization:
+    input:
+        input_statistics = rules.image_statistics.output.output_statistics,
+        input_image = rules.image_reconstruction.output.output_image
+    output:
+        output_figure = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.png"
+    params:
+        func="cedalion.dot.steps:image_visualization",
+        config=config["image_visualization"]
+    script:
+        "scripts/run_step.py"
+
+
+rule image_blockaverage:
+    input:
+        input_image = rules.image_reconstruction.output.output_image,
+        input_snirf = rules.preprocess.output.output_snirf
+    output:
+        output_image = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_blockaverage.nc"
+    params:
+        func="cedalion.dot.steps:image_blockaverage",
+        config=config["image_blockaverage"]
+    script:
+        "scripts/run_step.py"
+
+
+rule image_parcel_average:
+    input:
+        input_image = rules.image_blockaverage.output.output_image
+    output:
+        output_image = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_parcel_average.nc"
+    params:
+        func="cedalion.dot.steps:image_parcel_average",
+        config={}
+    script:
+        "scripts/run_step.py"
+
+
+rule image_group_average:
+    input:
+        input_images = expand(
+            DERIV_ROOT / "image_recon/sub-{subject}/ses-{{session}}/nirs/sub-{subject}_ses-{{session}}_task-{{task}}_image_parcel_average.nc",
+            subject=config["dataset"]["subjects"],
+        )
+    output:
+        output_image = DERIV_ROOT / "image_recon/group/ses-{session}/nirs/ses-{session}_task-{task}_image_group_average.nc"
+    params:
+        func="cedalion.dot.steps:image_group_average",
         config={}
     script:
         "scripts/run_step.py"

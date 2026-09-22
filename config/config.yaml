@@ -50,3 +50,33 @@ blockaverage:
   ts_name : "conc"
 
 
+
+sensitivity:
+  head_model: "colin27"
+
+image_reconstruction:
+  timeseries: "od_04"
+  alpha_meas_k: 0.01
+  alpha_spatial: 0.001
+  dOD_thresh: 0.001
+
+image_blockaverage:
+  t_pre: "2 s"
+  t_post: "30 s"
+  trial_types: ["motor"]
+
+image_feature:
+  t_pre: "2 s"
+  t_post: "20 s"
+  feature: "auc_diff"
+  baseline_window: ["-2 s", "0 s"]
+  activity_window: ["5 s", "15 s"]
+  trial_types: ["motor"]
+
+image_statistics:
+  alpha: 0.01
+  fdr_method: "indep"
+
+image_visualization:
+  head_model: "colin27"
+  trial_type: "motor"
