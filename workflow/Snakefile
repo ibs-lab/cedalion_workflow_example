@@ -10,6 +10,102 @@ wildcard_constraints:
 ROOT_DIR = Path(config["dataset"]["root_dir"]).resolve()
 DERIV_ROOT = Path(config["dataset"]["derivatives_dir"]).resolve()
 
+HEAD_MODEL_CONFIG = config["sensitivity"]["head_model"]
+CUSTOM_HEAD_MODEL = isinstance(HEAD_MODEL_CONFIG, dict)
+
+
+def resolve_head_model_config(value, wildcards):
+    """Resolve subject/session/task placeholders in custom head-model config."""
+    if isinstance(value, str):
+        return value.format(
+            subject=wildcards.subject,
+            session=wildcards.session,
+            task=wildcards.task,
+        )
+    if isinstance(value, dict):
+        return {
+            key: resolve_head_model_config(item, wildcards)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            resolve_head_model_config(item, wildcards)
+            for item in value
+        ]
+    return value
+
+
+def sensitivity_step_config(wildcards):
+    cfg = dict(config["sensitivity"])
+    if CUSTOM_HEAD_MODEL:
+        cfg["head_model"] = resolve_head_model_config(
+            HEAD_MODEL_CONFIG,
+            wildcards,
+        )
+    return cfg
+
+
+def image_visualization_step_config(wildcards):
+    cfg = dict(config["image_visualization"])
+    if CUSTOM_HEAD_MODEL:
+        cfg["head_model"] = resolve_head_model_config(
+            HEAD_MODEL_CONFIG,
+            wildcards,
+        )
+    return cfg
+
+
+def image_reconstruction_step_config(wildcards):
+    cfg = dict(config["image_reconstruction"])
+    sbf_cfg = cfg.get("spatial_basis_functions")
+
+    if CUSTOM_HEAD_MODEL and isinstance(sbf_cfg, dict):
+        sbf_cfg = dict(sbf_cfg)
+        sbf_cfg["head_model"] = resolve_head_model_config(
+            HEAD_MODEL_CONFIG,
+            wildcards,
+        )
+        cfg["spatial_basis_functions"] = sbf_cfg
+
+    return cfg
+
+
+if CUSTOM_HEAD_MODEL:
+    SENSITIVITY_INPUT = (
+        DERIV_ROOT
+        / "preprocess/sub-{subject}/ses-{session}/nirs/"
+        / "sub-{subject}_ses-{session}_task-{task}_nirs.snirf"
+    )
+    SENSITIVITY_FLUENCE = (
+        DERIV_ROOT
+        / "image_recon/sub-{subject}/ses-{session}/nirs/"
+        / "sub-{subject}_ses-{session}_task-{task}_fluence.h5"
+    )
+    SENSITIVITY_ADOT = (
+        DERIV_ROOT
+        / "image_recon/sub-{subject}/ses-{session}/nirs/"
+        / "sub-{subject}_ses-{session}_task-{task}_sensitivity.h5"
+    )
+else:
+    SENSITIVITY_INPUT = (
+        DERIV_ROOT
+        / f"preprocess/sub-{config['dataset']['subjects'][0]}"
+        / f"ses-{config['dataset']['sessions'][0]}/nirs"
+        / (
+            f"sub-{config['dataset']['subjects'][0]}"
+            f"_ses-{config['dataset']['sessions'][0]}"
+            f"_task-{config['dataset']['tasks'][0]}_nirs.snirf"
+        )
+    )
+    SENSITIVITY_FLUENCE = (
+        DERIV_ROOT
+        / f"image_recon/shared/{HEAD_MODEL_CONFIG}_fluence.h5"
+    )
+    SENSITIVITY_ADOT = (
+        DERIV_ROOT
+        / f"image_recon/shared/{HEAD_MODEL_CONFIG}_sensitivity.h5"
+    )
+
 PREPROCESSED_SNIRF = expand(
     DERIV_ROOT / "preprocess/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_nirs.snirf",
     subject=config["dataset"]["subjects"],
@@ -72,6 +168,12 @@ IMAGE_GROUP_AVERAGE = expand(
     task=config["dataset"]["tasks"]
 )
 
+IMAGE_GROUP_AVERAGE_VISUALIZATION = expand(
+    DERIV_ROOT / "image_recon/group/ses-{session}/nirs/ses-{session}_task-{task}_image_group_average.png",
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
 ANALYSIS_OVERVIEW = DERIV_ROOT / "analysis/preprocess_overview.png"
 
 rule all:
@@ -103,6 +205,7 @@ rule all:
         image_blockaverage = IMAGE_BLOCKAVERAGE,
         image_parcel_average = IMAGE_PARCEL_AVERAGE,
         image_group_average = IMAGE_GROUP_AVERAGE,
+        image_group_average_visualization = IMAGE_GROUP_AVERAGE_VISUALIZATION,
         analysis_overview = ANALYSIS_OVERVIEW
 
 
@@ -184,28 +287,13 @@ rule dqr:
 
 rule sensitivity:
     input:
-        input_snirf = (
-            DERIV_ROOT
-            / f"preprocess/sub-{config['dataset']['subjects'][0]}"
-            / f"ses-{config['dataset']['sessions'][0]}/nirs"
-            / (
-                f"sub-{config['dataset']['subjects'][0]}"
-                f"_ses-{config['dataset']['sessions'][0]}"
-                f"_task-{config['dataset']['tasks'][0]}_nirs.snirf"
-            )
-        )
+        input_snirf = SENSITIVITY_INPUT
     output:
-        output_fluence = (
-            DERIV_ROOT
-            / f"image_recon/shared/{config['sensitivity']['head_model']}_fluence.h5"
-        ),
-        output_sensitivity = (
-            DERIV_ROOT
-            / f"image_recon/shared/{config['sensitivity']['head_model']}_sensitivity.h5"
-        )
+        output_fluence = SENSITIVITY_FLUENCE,
+        output_sensitivity = SENSITIVITY_ADOT
     params:
         func="cedalion.dot.steps:sensitivity",
-        config=config["sensitivity"]
+        config=sensitivity_step_config
     script:
         "scripts/run_step.py"
 
@@ -218,7 +306,7 @@ rule image_reconstruction:
         output_image = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image.nc"
     params:
         func="cedalion.dot.steps:image_reconstruction",
-        config=config["image_reconstruction"]
+        config=image_reconstruction_step_config
     script:
         "scripts/run_step.py"
 
@@ -253,10 +341,15 @@ rule image_visualization:
         input_statistics = rules.image_statistics.output.output_statistics,
         input_image = rules.image_reconstruction.output.output_image
     output:
-        output_figure = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.png"
+        output_figure = report(
+            DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.png",
+            category="sub-{subject}",
+            subcategory="ses-{session}",
+            labels={"metric": "DOT image statistics"},
+        )
     params:
         func="cedalion.dot.steps:image_visualization",
-        config=config["image_visualization"]
+        config=image_visualization_step_config
     script:
         "scripts/run_step.py"
 
@@ -297,6 +390,23 @@ rule image_group_average:
     params:
         func="cedalion.dot.steps:image_group_average",
         config={}
+    script:
+        "scripts/run_step.py"
+
+
+rule image_group_average_visualization:
+    input:
+        input_image = rules.image_group_average.output.output_image
+    output:
+        output_figure = report(
+            DERIV_ROOT / "image_recon/group/ses-{session}/nirs/ses-{session}_task-{task}_image_group_average.png",
+            category="group",
+            subcategory="ses-{session}",
+            labels={"metric": "DOT image group average"},
+        )
+    params:
+        func="cedalion.dot.steps:image_group_average_visualization",
+        config=config["image_group_average_visualization"]
     script:
         "scripts/run_step.py"
 

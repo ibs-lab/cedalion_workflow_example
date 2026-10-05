@@ -52,12 +52,62 @@ blockaverage:
 
 
 sensitivity:
+  # Standard atlas head model. Supported names include "colin27" and "icbm152".
+  # Standard models use one shared sensitivity matrix across the dataset.
   head_model: "colin27"
+
+  # For an individualized/non-standard head model, replace the line above with
+  # a configuration such as the following. {subject}, {session}, and {task}
+  # placeholders are resolved by the workflow for each recording.
+  #
+  # For the full parcel-based workflow, coordinates_file should describe the
+  # same brain surface and include a "parcel" column.
+  #
+  # head_model:
+  #   type: "surfaces"
+  #   segmentation_dir: "/path/to/heads/sub-{subject}"
+  #   brain_surface_file: "/path/to/heads/sub-{subject}/brain.obj"
+  #   scalp_surface_file: "/path/to/heads/sub-{subject}/scalp.obj"
+  #   landmarks_ras_file: "/path/to/heads/sub-{subject}/landmarks.json"
+  #   coordinates_file: "/path/to/heads/sub-{subject}/brain_vertex_coordinates.csv"
+  #
+  # A head model can also be constructed directly from a segmentation:
+  #
+  # head_model:
+  #   type: "segmentation"
+  #   segmentation_dir: "/path/to/heads/sub-{subject}"
+  #   landmarks_ras_file: "/path/to/heads/sub-{subject}/landmarks.json"
+  #
+  # Segmentation-only models can be used for sensitivity and vertex-space
+  # reconstruction, but parcel-based downstream analysis requires parcel labels.
 
 image_reconstruction:
   timeseries: "od_04"
+
+  # Measurement regularization. When alpha_meas is null, estimate it from
+  # the measurement variance using alpha_meas_k.
+  alpha_meas: null
   alpha_meas_k: 0.01
   alpha_spatial: 0.001
+  lambda_R_conc: null
+  apply_c_meas: true
+
+  # ImageRecon options: "mua", "conc", or "mua2conc".
+  recon_mode: "mua2conc"
+  brain_only: false
+
+  # Set to a Gaussian configuration to enable spatial basis functions.
+  spatial_basis_functions: null
+  # spatial_basis_functions:
+  #   type: "gaussian"
+  #   head_model: "colin27"
+  #   mask_threshold: -2
+  #   threshold_brain: "1 mm"
+  #   threshold_scalp: "5 mm"
+  #   sigma_brain: "1 mm"
+  #   sigma_scalp: "5 mm"
+  #   verbose: false
+
   dOD_thresh: 0.001
 
 image_blockaverage:
@@ -79,4 +129,7 @@ image_statistics:
 
 image_visualization:
   head_model: "colin27"
+  trial_type: "motor"
+
+image_group_average_visualization:
   trial_type: "motor"
