@@ -1,10 +1,18 @@
 dataset:
   root_dir : "resources/rawdata"
   derivatives_dir: "results"
-  subjects : ["01", "02", "03", "04", "05", "06", "07", "08", "09"]
+  subjects : ["01", "02"] #, "03", "04", "05", "06", "07", "08", "09"]
   tasks: ["FRESHMOTOR"]
-  sessions: ["left2s", "left3s", "right2s", "right3s"]
+  sessions: ["left2s", "right2s"] #, "left3s", "right3s"]
 
+# Head model used by all DOT steps: either a standard atlas head model ("colin27" or
+# "icbm152") or the path to a head model manifest (headmodel_manifest.json) of an
+# individual head. {subject}, {session} and {task} placeholders in the path are
+# filled in by the workflow for each recording, e.g.:
+#   head_model: "/path/to/heads/sub-{subject}/headmodel_manifest.json"
+# An unscaled standard head model is shared by all recordings, so its sensitivity
+# matrix is computed only once.
+head_model: "colin27"
 
 preprocess:
   keep_intermediate : True
@@ -49,37 +57,17 @@ blockaverage:
   t_post : "30 s"
   ts_name : "conc"
 
-
+register_probe:
+  method: "spring_relax"
+  # Optionally scale the head model to the subject's head:
+  # scale_to: "landmarks"   # fit to the probe's landmarks
+  # scale_to: "headsize"    # fit to head size measurements:
+  # circumference: "56 cm"
+  # nz_cz_iz: "35 cm"
+  # lpa_cz_rpa: "36 cm"
 
 sensitivity:
-  # Standard atlas head model. Supported names include "colin27" and "icbm152".
-  # Standard models use one shared sensitivity matrix across the dataset.
-  head_model: "colin27"
-
-  # For an individualized/non-standard head model, replace the line above with
-  # a configuration such as the following. {subject}, {session}, and {task}
-  # placeholders are resolved by the workflow for each recording.
-  #
-  # For the full parcel-based workflow, coordinates_file should describe the
-  # same brain surface and include a "parcel" column.
-  #
-  # head_model:
-  #   type: "surfaces"
-  #   segmentation_dir: "/path/to/heads/sub-{subject}"
-  #   brain_surface_file: "/path/to/heads/sub-{subject}/brain.obj"
-  #   scalp_surface_file: "/path/to/heads/sub-{subject}/scalp.obj"
-  #   landmarks_ras_file: "/path/to/heads/sub-{subject}/landmarks.json"
-  #   coordinates_file: "/path/to/heads/sub-{subject}/brain_vertex_coordinates.csv"
-  #
-  # A head model can also be constructed directly from a segmentation:
-  #
-  # head_model:
-  #   type: "segmentation"
-  #   segmentation_dir: "/path/to/heads/sub-{subject}"
-  #   landmarks_ras_file: "/path/to/heads/sub-{subject}/landmarks.json"
-  #
-  # Segmentation-only models can be used for sensitivity and vertex-space
-  # reconstruction, but parcel-based downstream analysis requires parcel labels.
+  method: "nirfaster"
 
 image_reconstruction:
   timeseries: "od_04"
@@ -100,7 +88,6 @@ image_reconstruction:
   spatial_basis_functions: null
   # spatial_basis_functions:
   #   type: "gaussian"
-  #   head_model: "colin27"
   #   mask_threshold: -2
   #   threshold_brain: "1 mm"
   #   threshold_scalp: "5 mm"
@@ -128,7 +115,6 @@ image_statistics:
   fdr_method: "indep"
 
 image_visualization:
-  head_model: "colin27"
   trial_type: "motor"
 
 image_group_average_visualization:

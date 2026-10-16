@@ -10,72 +10,37 @@ wildcard_constraints:
 ROOT_DIR = Path(config["dataset"]["root_dir"]).resolve()
 DERIV_ROOT = Path(config["dataset"]["derivatives_dir"]).resolve()
 
-HEAD_MODEL_CONFIG = config["sensitivity"]["head_model"]
-CUSTOM_HEAD_MODEL = isinstance(HEAD_MODEL_CONFIG, dict)
+HEAD_MODEL = config["head_model"]
+STANDARD_HEAD_MODEL = HEAD_MODEL in ("colin27", "icbm152")
 
+# A head model manifest is a file. As a named rule input, Snakemake fills in its
+# {subject}, {session} and {task} placeholders and tracks it. Standard head models
+# are passed by name as a parameter. run_step.py merges both into the step arguments.
+HEAD_MODEL_INPUT = {} if STANDARD_HEAD_MODEL else {"head_model": HEAD_MODEL}
+HEAD_MODEL_PARAM = {"head_model": HEAD_MODEL} if STANDARD_HEAD_MODEL else {}
 
-def resolve_head_model_config(value, wildcards):
-    """Resolve subject/session/task placeholders in custom head-model config."""
-    if isinstance(value, str):
-        return value.format(
-            subject=wildcards.subject,
-            session=wildcards.session,
-            task=wildcards.task,
-        )
-    if isinstance(value, dict):
-        return {
-            key: resolve_head_model_config(item, wildcards)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [
-            resolve_head_model_config(item, wildcards)
-            for item in value
-        ]
-    return value
+REGISTERED_OPTODES = (
+    DERIV_ROOT
+    / "preprocess/sub-{subject}/ses-{session}/nirs/"
+    / "sub-{subject}_ses-{session}_task-{task}_optodes.tsv"
+)
 
+# An unscaled standard head model is the same for all recordings. Its sensitivity
+# matrix is computed once with the probe of the first recording and shared.
+SHARED_SENSITIVITY = (
+    STANDARD_HEAD_MODEL and config["register_probe"].get("scale_to") is None
+)
 
-def sensitivity_step_config(wildcards):
-    cfg = dict(config["sensitivity"])
-    if CUSTOM_HEAD_MODEL:
-        cfg["head_model"] = resolve_head_model_config(
-            HEAD_MODEL_CONFIG,
-            wildcards,
-        )
-    return cfg
-
-
-def image_visualization_step_config(wildcards):
-    cfg = dict(config["image_visualization"])
-    if CUSTOM_HEAD_MODEL:
-        cfg["head_model"] = resolve_head_model_config(
-            HEAD_MODEL_CONFIG,
-            wildcards,
-        )
-    return cfg
-
-
-def image_reconstruction_step_config(wildcards):
-    cfg = dict(config["image_reconstruction"])
-    sbf_cfg = cfg.get("spatial_basis_functions")
-
-    if CUSTOM_HEAD_MODEL and isinstance(sbf_cfg, dict):
-        sbf_cfg = dict(sbf_cfg)
-        sbf_cfg["head_model"] = resolve_head_model_config(
-            HEAD_MODEL_CONFIG,
-            wildcards,
-        )
-        cfg["spatial_basis_functions"] = sbf_cfg
-
-    return cfg
-
-
-if CUSTOM_HEAD_MODEL:
-    SENSITIVITY_INPUT = (
-        DERIV_ROOT
-        / "preprocess/sub-{subject}/ses-{session}/nirs/"
-        / "sub-{subject}_ses-{session}_task-{task}_nirs.snirf"
+if SHARED_SENSITIVITY:
+    SENSITIVITY_OPTODES = str(REGISTERED_OPTODES).format(
+        subject=config["dataset"]["subjects"][0],
+        session=config["dataset"]["sessions"][0],
+        task=config["dataset"]["tasks"][0],
     )
+    SENSITIVITY_FLUENCE = DERIV_ROOT / f"image_recon/shared/{HEAD_MODEL}_fluence.h5"
+    SENSITIVITY_ADOT = DERIV_ROOT / f"image_recon/shared/{HEAD_MODEL}_sensitivity.h5"
+else:
+    SENSITIVITY_OPTODES = REGISTERED_OPTODES
     SENSITIVITY_FLUENCE = (
         DERIV_ROOT
         / "image_recon/sub-{subject}/ses-{session}/nirs/"
@@ -85,25 +50,6 @@ if CUSTOM_HEAD_MODEL:
         DERIV_ROOT
         / "image_recon/sub-{subject}/ses-{session}/nirs/"
         / "sub-{subject}_ses-{session}_task-{task}_sensitivity.h5"
-    )
-else:
-    SENSITIVITY_INPUT = (
-        DERIV_ROOT
-        / f"preprocess/sub-{config['dataset']['subjects'][0]}"
-        / f"ses-{config['dataset']['sessions'][0]}/nirs"
-        / (
-            f"sub-{config['dataset']['subjects'][0]}"
-            f"_ses-{config['dataset']['sessions'][0]}"
-            f"_task-{config['dataset']['tasks'][0]}_nirs.snirf"
-        )
-    )
-    SENSITIVITY_FLUENCE = (
-        DERIV_ROOT
-        / f"image_recon/shared/{HEAD_MODEL_CONFIG}_fluence.h5"
-    )
-    SENSITIVITY_ADOT = (
-        DERIV_ROOT
-        / f"image_recon/shared/{HEAD_MODEL_CONFIG}_sensitivity.h5"
     )
 
 PREPROCESSED_SNIRF = expand(
@@ -237,7 +183,7 @@ def raw_data_files(wc):
     return {
         "input_snirf": prefix / f"sub-{wc.subject}_ses-{wc.session}_task-{wc.task}_nirs.snirf",
         "input_events": prefix / f"sub-{wc.subject}_ses-{wc.session}_task-{wc.task}_events.tsv",
-        "input_optodes": prefix / f"sub-{wc.subject}_ses-{wc.session}_optodes.json",
+        "input_optodes": prefix / f"sub-{wc.subject}_ses-{wc.session}_optodes.tsv",
         "input_coordsystem": prefix / f"sub-{wc.subject}_ses-{wc.session}_coordsystem.json",
     }
 
@@ -285,15 +231,29 @@ rule dqr:
         "scripts/run_step.py"
 
 
+rule register_probe:
+    input:
+        input_snirf = rules.preprocess.output.output_snirf,
+        **HEAD_MODEL_INPUT,
+    output:
+        output_optodes = REGISTERED_OPTODES,
+    params:
+        func="cedalion.dot.steps:register_probe",
+        config=config["register_probe"] | HEAD_MODEL_PARAM
+    script:
+        "scripts/run_step.py"
+
+
 rule sensitivity:
     input:
-        input_snirf = SENSITIVITY_INPUT
+        input_optodes = SENSITIVITY_OPTODES,
+        **HEAD_MODEL_INPUT,
     output:
         output_fluence = SENSITIVITY_FLUENCE,
         output_sensitivity = SENSITIVITY_ADOT
     params:
         func="cedalion.dot.steps:sensitivity",
-        config=sensitivity_step_config
+        config=config["sensitivity"] | HEAD_MODEL_PARAM
     script:
         "scripts/run_step.py"
 
@@ -301,12 +261,15 @@ rule sensitivity:
 rule image_reconstruction:
     input:
         input_snirf = rules.preprocess.output.output_snirf,
-        input_sensitivity = rules.sensitivity.output.output_sensitivity
+        input_sensitivity = rules.sensitivity.output.output_sensitivity,
+        # the probe registration from which the sensitivity matrix was computed
+        input_optodes = SENSITIVITY_OPTODES,
+        **HEAD_MODEL_INPUT,
     output:
         output_image = DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image.nc"
     params:
         func="cedalion.dot.steps:image_reconstruction",
-        config=image_reconstruction_step_config
+        config=config["image_reconstruction"] | HEAD_MODEL_PARAM
     script:
         "scripts/run_step.py"
 
@@ -339,7 +302,8 @@ rule image_statistics:
 rule image_visualization:
     input:
         input_statistics = rules.image_statistics.output.output_statistics,
-        input_image = rules.image_reconstruction.output.output_image
+        input_image = rules.image_reconstruction.output.output_image,
+        **HEAD_MODEL_INPUT,
     output:
         output_figure = report(
             DERIV_ROOT / "image_recon/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_image_statistics.png",
@@ -349,7 +313,7 @@ rule image_visualization:
         )
     params:
         func="cedalion.dot.steps:image_visualization",
-        config=image_visualization_step_config
+        config=config["image_visualization"] | HEAD_MODEL_PARAM
     script:
         "scripts/run_step.py"
 
