@@ -52,6 +52,19 @@ preprocess:
     - {name: od_ff,  method: freq_filter, params: {fmin: "0.01 Hz", fmax: "0.5 Hz"}}
     - {name: conc,  method: od2conc}
 
+hrf_estimation:
+  t_pre: "2 s"
+  t_post: "10 s"
+  t_delta: "1 s"
+  t_std: "1 s"
+  ts_name: "od_03"
+  noise_model: "ar_irls"
+  ar_order: 60
+  trial_types: ["motor"]
+  drift_order: 3
+  distance_threshold: "20 mm"
+  use_short_separation: true
+
 blockaverage:
   t_pre : "2 s"
   t_post : "30 s"

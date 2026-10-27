@@ -375,6 +375,18 @@ rule image_group_average_visualization:
         "scripts/run_step.py"
 
 
+rule hrf_estimation:
+    input:
+        input_snirf = rules.preprocess.output.output_snirf,
+    output:
+        output_hrf = DERIV_ROOT / "analysis/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_hrf.nc",
+    params:
+        func="cedalion.sigproc.hrf_estimation:estimate_hrf",
+        config=config["hrf_estimation"]
+    script:
+        "scripts/run_step.py"
+
+
 rule blockaverage:
     input:
         input_snirf = expand(
