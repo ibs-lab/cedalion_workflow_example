@@ -59,6 +59,13 @@ PREPROCESSED_SNIRF = expand(
     task=config["dataset"]["tasks"]
 )
 
+HRF_ESTIMATES = expand(
+    DERIV_ROOT / "analysis/sub-{subject}/ses-{session}/nirs/sub-{subject}_ses-{session}_task-{task}_hrf.nc",
+    subject=config["dataset"]["subjects"],
+    session=config["dataset"]["sessions"],
+    task=config["dataset"]["tasks"]
+)
+
 BLOCKAVERAGE_SNIRF = expand(
     DERIV_ROOT / "analysis/ses-{session}/nirs/ses-{session}_task-{task}_blockaverage.snirf",
     session=config["dataset"]["sessions"],
@@ -144,6 +151,7 @@ rule all:
             task=config["dataset"]["tasks"]
         ),
         blockaverage = BLOCKAVERAGE_SNIRF,
+        hrf_estimation = HRF_ESTIMATES,
         image_reconstruction = IMAGE_RECON,
         image_feature = IMAGE_FEATURE,
         image_statistics = IMAGE_STATISTICS,
